@@ -28,3 +28,5 @@ module Incoming : sig
 
   val gen : 'a Quickcheck.Generator.t -> 'a t Quickcheck.Generator.t
 end
+
+type 'a gossip = Gossip of { incoming : 'a Incoming.t; topic : string }

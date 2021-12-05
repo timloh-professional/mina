@@ -110,3 +110,5 @@ module Incoming = struct
     let received_at = Time.now () in
     { data; sender; received_at }
 end
+
+type 'a gossip = Gossip of { incoming : 'a Incoming.t; topic : string }

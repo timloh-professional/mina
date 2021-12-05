@@ -37,7 +37,7 @@ func TestMain(m *testing.M) {
 	// _ = logging.SetLogLevel("codanet.Helper", "WARN")
 	// _ = logging.SetLogLevel("codanet.CodaGatingState", "WARN")
 	// for i := 0; i < 100; i++ {
-	// 	logging.SetLogLevel(fmt.Sprintf("node%d", i), "WARN")
+	// 	logging.SetLogLevel(fmt.Sprintf("node%d", i), "DEBUG")
 	// }
 	// _ = logging.SetLogLevel("dht", "debug")
 	// _ = logging.SetLogLevel("connmgr", "debug")
