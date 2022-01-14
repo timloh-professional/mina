@@ -40,17 +40,23 @@ module Node = struct
     Util.run_cmd_exn cwd "kubectl"
       (base_kube_args config @ [ "logs"; "-c"; container_id; pod_id ])
 
-  let run_in_container ?container_id ~cmd { pod_id; config; info; _ } =
+  let run_in_container ?(env_vars = []) ?container_id ~cmd { pod_id; config; info; _ } =
     let container_id =
       Option.value container_id ~default:info.primary_container_id
     in
     let%bind cwd = Unix.getcwd () in
+    let env =
+      List.map ~f:(fun (k, v) -> sprintf "%s=%s" k v) env_vars
+    in
+    let cmd_with_env =
+      match env with [] -> cmd | _ -> "env" :: env @ cmd
+    in
     Util.run_cmd_exn cwd "kubectl"
       ( base_kube_args config
       @ [ "exec"; "-c"; container_id; "-i"; pod_id; "--" ]
-      @ cmd )
+      @ cmd_with_env )
 
-  let start ~fresh_state node : unit Malleable_error.t =
+  let start ~fresh_state ?(env_vars = []) node : unit Malleable_error.t =
     let open Deferred.Let_syntax in
     let%bind () =
       if fresh_state then
@@ -59,7 +65,7 @@ module Node = struct
       else Deferred.return ()
     in
     let%bind () =
-      Deferred.ignore_m (run_in_container node ~cmd:[ "/start.sh" ])
+        Deferred.ignore_m (run_in_container ~env_vars node ~cmd:[ "/start.sh" ])
     in
     Malleable_error.return ()
 
@@ -172,6 +178,19 @@ module Node = struct
       }
     |}]
 
+    module Query_metrics =
+    [%graphql
+    {|
+      query {
+        daemonStatus {
+          metrics {
+            banNotifyRpcsSent
+            banNotifyRpcsReceived
+          }
+        }
+      }
+    |}]
+
     module Best_chain =
     [%graphql
     {|
@@ -256,6 +275,28 @@ module Node = struct
       self_id
       (String.concat ~sep:" " peer_ids) ;
     return (self_id, peer_ids)
+
+  let get_metrics ~logger t =
+    let open Deferred.Or_error.Let_syntax in
+    [%log info] "Getting node's metrics"
+      ~metadata:(logger_metadata t);
+    let query_obj = Graphql.Query_metrics.make () in
+    let%bind query_result_obj =
+      exec_graphql_request ~logger ~node:t ~query_name:"query_metrics" query_obj
+    in
+    [%log info] "get_metrics, finished exec_graphql_request" ;
+    let bn_sent = query_result_obj#daemonStatus#metrics#banNotifyRpcsSent in
+    let bn_received =
+      query_result_obj#daemonStatus#metrics#banNotifyRpcsReceived
+    in
+    [%log info]
+      "get_metrics, result of graphql query (ban_notify_rpcs_sent, \
+       ban_notify_rpcs_received) (%d, %d)"
+      bn_sent bn_received ;
+    return
+      { Intf.ban_notify_rpcs_sent = bn_sent
+      ; ban_notify_rpcs_received = bn_received
+      }
 
   let must_get_peer_id ~logger t =
     get_peer_id ~logger t |> Deferred.bind ~f:Malleable_error.or_hard_error
