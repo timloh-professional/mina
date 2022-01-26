@@ -4153,6 +4153,9 @@ struct
     in
     match to_preunion transaction with
     | `Parties _ ->
+        Format.eprintf "STACK: %s@."
+          ( Caml.Printexc.get_callstack 20
+          |> Caml.Printexc.raw_backtrace_to_string ) ;
         failwith "Called Non-parties transaction with parties transaction"
     | `Transaction t ->
         of_transaction_union ~statement ~init_stack

@@ -11,7 +11,8 @@ module Sparse_ledger = struct
   let merkle_root t = Frozen_ledger_hash.of_ledger_hash @@ merkle_root t
 end
 
-let create_ledger_and_transactions num_transitions =
+let create_ledger_and_transactions num_transitions :
+    Ledger.t * _ User_command.t_ Transaction.t_ list =
   let num_accounts = 4 in
   let constraint_constants = Genesis_constants.Constraint_constants.compiled in
   let ledger = Ledger.create ~depth:constraint_constants.ledger_depth () in
@@ -101,6 +102,41 @@ let create_ledger_and_transactions num_transitions =
           (Account.Nonce.succ Account.Nonce.zero)
       in
       (ledger, [ Command (Signed_command a); Command (Signed_command b) ])
+
+let create_ledger_and_snapps num_transitions :
+    Ledger.t * _ User_command.t_ Transaction.t_ list =
+  let length =
+    match num_transitions with
+    | `Count length ->
+        length
+    | `Two_from_same ->
+        failwith "Must provide a count when profiling with snapps"
+  in
+  let cmd_infos, ledger =
+    Quickcheck.random_value
+      (User_command_generators.sequence_parties_with_ledger ~length ())
+  in
+  let snapps =
+    List.map cmd_infos ~f:(fun (user_cmd, _keypair, _keymap) -> user_cmd)
+  in
+  List.iteri snapps ~f:(fun i cmd ->
+      match cmd with
+      | Parties parties ->
+          Format.printf "Snapp %d@." i ;
+          Format.printf "  No. other parties = %d@."
+            (List.length parties.other_parties) ;
+          let predicates =
+            List.map parties.other_parties ~f:(fun party ->
+                sprintf
+                  !"%{sexp: Party.Predicate.Tag.t}"
+                  (Party.Predicate.tag
+                     party.data.Party.Predicated.Poly.predicate))
+          in
+          Format.printf "  Predicates: %s@." (String.concat ~sep:"," predicates)
+      | Signed_command _ ->
+          failwith "Expected Parties, got Signed_command") ;
+  let txns = List.map snapps ~f:(fun snapp -> Transaction.Command snapp) in
+  (ledger, txns)
 
 let time thunk =
   let start = Time.now () in
@@ -312,8 +348,11 @@ let generate_base_snarks_witness sparse_ledger0
       : Sparse_ledger.t ) ;
   "Base constraint system satisfied"
 
-let run profiler num_transactions repeats preeval =
-  let ledger, transactions = create_ledger_and_transactions num_transactions in
+let run profiler num_transactions repeats preeval use_snapps =
+  let ledger, transactions =
+    if use_snapps then create_ledger_and_snapps num_transactions
+    else create_ledger_and_transactions num_transactions
+  in
   let sparse_ledger =
     Mina_base.Sparse_ledger.of_ledger_subset_exn ledger
       ( fst
@@ -334,7 +373,7 @@ let run profiler num_transactions repeats preeval =
   done ;
   exit 0
 
-let main num_transactions repeats preeval () =
+let main num_transactions repeats preeval use_snapps () =
   Test_util.with_randomness 123456789 (fun () ->
       let module T = Transaction_snark.Make (struct
         let constraint_constants =
@@ -342,46 +381,50 @@ let main num_transactions repeats preeval () =
 
         let proof_level = Genesis_constants.Proof_level.Full
       end) in
-      run (profile (module T)) num_transactions repeats preeval)
+      run (profile (module T)) num_transactions repeats preeval use_snapps)
 
-let dry num_transactions repeats preeval () =
+let dry num_transactions repeats preeval use_snapps () =
   Test_util.with_randomness 123456789 (fun () ->
-      run check_base_snarks num_transactions repeats preeval)
+      run check_base_snarks num_transactions repeats preeval use_snapps)
 
-let witness num_transactions repeats preeval () =
+let witness num_transactions repeats preeval use_snapps () =
   Test_util.with_randomness 123456789 (fun () ->
-      run generate_base_snarks_witness num_transactions repeats preeval)
+      run generate_base_snarks_witness num_transactions repeats preeval
+        use_snapps)
 
 let command =
   let open Command.Let_syntax in
   Command.basic ~summary:"transaction snark profiler"
     (let%map_open n =
-       flag "-k"
+       flag "--k" ~aliases:[ "-k" ]
          ~doc:
-           "count count = log_2(number of transactions to snark) or none for \
-            the mocked ones"
+           "count count = log_2(number of transactions to snark); omit for \
+            mocked transactions; required for snapps"
          (optional int)
      and repeats =
-       flag "--repeat" ~aliases:[ "repeat" ]
+       flag "--repeat" ~aliases:[ "-repeat" ]
          ~doc:"count number of times to repeat the profile" (optional int)
      and preeval =
-       flag "--preeval" ~aliases:[ "preeval" ]
+       flag "--preeval" ~aliases:[ "-preeval" ]
          ~doc:
            "true/false whether to pre-evaluate the checked computation to \
             cache interpreter and computation state"
          (optional bool)
      and check_only =
-       flag "--check-only" ~aliases:[ "check-only" ]
+       flag "--check-only" ~aliases:[ "-check-only" ]
          ~doc:"Just check base snarks, don't keys or time anything" no_arg
      and witness_only =
-       flag "--witness-only" ~aliases:[ "witness-only" ]
+       flag "--witness-only" ~aliases:[ "-witness-only" ]
          ~doc:"Just generate the witnesses for the base snarks" no_arg
+     and use_snapps =
+       flag "--snapps" ~aliases:[ "-snapps" ]
+         ~doc:"Use snapp transactions instead of payments" no_arg
      in
      let num_transactions =
        Option.map n ~f:(fun n -> `Count (Int.pow 2 n))
        |> Option.value ~default:`Two_from_same
      in
      let repeats = Option.value repeats ~default:1 in
-     if witness_only then witness num_transactions repeats preeval
-     else if check_only then dry num_transactions repeats preeval
-     else main num_transactions repeats preeval)
+     if witness_only then witness num_transactions repeats preeval use_snapps
+     else if check_only then dry num_transactions repeats preeval use_snapps
+     else main num_transactions repeats preeval use_snapps)
