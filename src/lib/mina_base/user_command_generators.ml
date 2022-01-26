@@ -4,11 +4,13 @@
    Parties
 *)
 
+[%%import "/src/config.mlh"]
+
 open Core_kernel
 include User_command.Gen
 
 (* using Precomputed_values depth introduces a cyclic dependency *)
-let ledger_depth = 20
+[%%inject "ledger_depth", ledger_depth]
 
 let parties_with_ledger () =
   let open Quickcheck.Let_syntax in

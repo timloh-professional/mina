@@ -178,11 +178,11 @@ let pending_coinbase_stack_target (t : Transaction.t) stack =
 
 (* This gives the "wall-clock time" to snarkify the given list of transactions, assuming
    unbounded parallelism. *)
-let profile (module T : Transaction_snark.S) sparse_ledger0
+let profile (module T : Transaction_snark.S) use_snapps sparse_ledger0
     (transitions : Transaction.Valid.t list) _ =
   let constraint_constants = Genesis_constants.Constraint_constants.compiled in
   let txn_state_view = Lazy.force curr_state_view in
-  let (base_proof_time, _, _), base_proofs =
+  let (base_proof_time, _, _), base_proofss =
     List.fold_map transitions
       ~init:(Time.Span.zero, sparse_ledger0, Pending_coinbase.Stack.empty)
       ~f:(fun (max_span, sparse_ledger, coinbase_stack_source) t ->
@@ -200,38 +200,71 @@ let profile (module T : Transaction_snark.S) sparse_ledger0
           pending_coinbase_stack_target (Transaction.forget t)
             coinbase_stack_source
         in
-        let span, proof =
+        let span, proofs =
           time (fun () ->
-              Async.Thread_safe.block_on_async_exn (fun () ->
-                  T.of_non_parties_transaction
-                    ~statement:
-                      { sok_digest = Sok_message.Digest.default
-                      ; source =
-                          { ledger = Sparse_ledger.merkle_root sparse_ledger
-                          ; pending_coinbase_stack = coinbase_stack_source
-                          ; next_available_token = next_available_token_before
-                          ; local_state = Mina_state.Local_state.empty
+              Async.Thread_safe.block_on_async_exn
+                ( if use_snapps then fun () ->
+                  let parties =
+                    match Transaction.forget t with
+                    | Mina_base.Transaction.Poly.Command (cmd : User_command.t)
+                      -> (
+                        match cmd with
+                        | Parties parties ->
+                            parties
+                        | Signed_command _ ->
+                            failwith "Expected Parties, got Signed_command" )
+                    | _ ->
+                        failwith "Expected Command"
+                  in
+                  let witnesses =
+                    Transaction_snark.parties_witnesses_exn
+                      ~constraint_constants ~state_body:(Lazy.force state_body)
+                      ~fee_excess:Currency.Amount.Signed.zero
+                      ~pending_coinbase_init_stack:coinbase_stack_source
+                      (`Sparse_ledger sparse_ledger) [ parties ]
+                  in
+                  Async.Deferred.List.fold ~init:[] (List.rev witnesses)
+                    ~f:(fun acc (witness, spec, statement, snapp_statement) ->
+                      let%map.Async.Deferred snark =
+                        T.of_parties_segment_exn ~snapp_statement ~statement
+                          ~witness ~spec
+                      in
+                      snark :: acc)
+                else fun () ->
+                  Async.Deferred.List.map ~f:Fn.id
+                    [ T.of_non_parties_transaction
+                        ~statement:
+                          { sok_digest = Sok_message.Digest.default
+                          ; source =
+                              { ledger = Sparse_ledger.merkle_root sparse_ledger
+                              ; pending_coinbase_stack = coinbase_stack_source
+                              ; next_available_token =
+                                  next_available_token_before
+                              ; local_state = Mina_state.Local_state.empty
+                              }
+                          ; target =
+                              { ledger =
+                                  Sparse_ledger.merkle_root sparse_ledger'
+                              ; pending_coinbase_stack = coinbase_stack_target
+                              ; next_available_token =
+                                  next_available_token_after
+                              ; local_state = Mina_state.Local_state.empty
+                              }
+                          ; supply_increase =
+                              Transaction.supply_increase t |> Or_error.ok_exn
+                          ; fee_excess =
+                              Transaction.fee_excess (Transaction.forget t)
+                              |> Or_error.ok_exn
                           }
-                      ; target =
-                          { ledger = Sparse_ledger.merkle_root sparse_ledger'
-                          ; pending_coinbase_stack = coinbase_stack_target
-                          ; next_available_token = next_available_token_after
-                          ; local_state = Mina_state.Local_state.empty
-                          }
-                      ; supply_increase =
-                          Transaction.supply_increase t |> Or_error.ok_exn
-                      ; fee_excess =
-                          Transaction.fee_excess (Transaction.forget t)
-                          |> Or_error.ok_exn
-                      }
-                    ~init_stack:coinbase_stack_source
-                    { Transaction_protocol_state.Poly.transaction = t
-                    ; block_data = Lazy.force state_body
-                    }
-                    (unstage (Sparse_ledger.handler sparse_ledger))))
+                        ~init_stack:coinbase_stack_source
+                        { Transaction_protocol_state.Poly.transaction = t
+                        ; block_data = Lazy.force state_body
+                        }
+                        (unstage (Sparse_ledger.handler sparse_ledger))
+                    ] ))
         in
         ( (Time.Span.max span max_span, sparse_ledger', coinbase_stack_target)
-        , proof ))
+        , proofs ))
   in
   let rec merge_all serial_time proofs =
     match proofs with
@@ -251,6 +284,7 @@ let profile (module T : Transaction_snark.S) sparse_ledger0
         in
         merge_all (Time.Span.( + ) serial_time layer_time) new_proofs
   in
+  let base_proofs = List.concat base_proofss in
   let total_time = merge_all base_proof_time base_proofs in
   Printf.sprintf !"Total time was: %{Time.Span}" total_time
 
@@ -381,7 +415,9 @@ let main num_transactions repeats preeval use_snapps () =
 
         let proof_level = Genesis_constants.Proof_level.Full
       end) in
-      run (profile (module T)) num_transactions repeats preeval use_snapps)
+      run
+        (profile (module T) use_snapps)
+        num_transactions repeats preeval use_snapps)
 
 let dry num_transactions repeats preeval use_snapps () =
   Test_util.with_randomness 123456789 (fun () ->
