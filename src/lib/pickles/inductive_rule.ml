@@ -6,7 +6,7 @@ module B = struct
   type t = Impls.Step.Boolean.var
 end
 
-(* This type models an "inductive rule". It includes
+(** This type models an "inductive rule". It includes
    - the list of previous statements which this one assumes
    - the snarky main function
    - an unchecked version of the main function which computes the "should verify" flags that

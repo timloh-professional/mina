@@ -130,6 +130,7 @@ let scalars_env (type c t) (module F : Field_intf with type t = t) ~endo ~mds
       if n mod 2 = 0 then y else x * y
   in
   let alpha_pows =
+    (* TODO: why 71? *)
     let arr = Array.create ~len:71 one in
     arr.(1) <- alpha ;
     for i = 2 to Int.(Array.length arr - 1) do

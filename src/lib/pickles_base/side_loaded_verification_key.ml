@@ -2,6 +2,8 @@ open Core_kernel
 open Pickles_types
 module Ds = Domains
 
+
+(** [bits ~len n] returns the bit-decomposition (LSB first) of [n], truncated to [len] *)
 let bits ~len n = List.init len ~f:(fun i -> (n lsr i) land 1 = 1)
 
 let max_log2_degree = 32

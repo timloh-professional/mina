@@ -1,3 +1,7 @@
+(** This module implements homogeneous lists, 
+    lists that can contain elements of different types.
+*)
+
 module Length = struct
   type (_, _) t =
     | Z : (unit, Nat.z) t

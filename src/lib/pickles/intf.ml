@@ -286,6 +286,7 @@ module Pairing_main_inputs = struct
   end
 end
 
+(** the public input of a circuit *)
 module type Statement = sig
   type field
 

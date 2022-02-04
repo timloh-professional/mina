@@ -1,3 +1,5 @@
+(** A one hot vector is a vector of boolean-constrained field elements, of which exactly one is true *)
+
 open Pickles_types
 
 module Constant : sig
