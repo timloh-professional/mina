@@ -8078,8 +8078,6 @@ let%test_module "account timing check" =
 
     let constraint_constants = For_tests.constraint_constants
 
-    let consensus_constants = For_tests.consensus_constants
-
     (* test that unchecked and checked calculations for timing agree *)
 
     let checked_min_balance_and_timing account txn_amount txn_global_slot =
@@ -8365,20 +8363,10 @@ let%test_module "account timing check" =
       | _ ->
           false
 
-    let state_body =
-      let compile_time_genesis =
-        Mina_state.Genesis_protocol_state.t
-          ~genesis_ledger:Genesis_ledger.(Packed.t for_unit_tests)
-          ~genesis_epoch_data:Consensus.Genesis_epoch_data.for_unit_tests
-          ~constraint_constants ~consensus_constants
-      in
-      compile_time_genesis.data |> Mina_state.Protocol_state.body
-
-    let txn_state_view = Mina_state.Protocol_state.Body.view state_body
-
     let apply_user_commands_at_slot ledger slot (txns : Transaction.t list) =
       ignore
         ( List.map txns ~f:(fun txn ->
+              Format.eprintf "APPLYING TXN!@." ;
               let uc =
                 match txn with
                 | Command (Signed_command uc) ->
@@ -8411,7 +8399,7 @@ let%test_module "account timing check" =
         let%bind ledger_init_state0 =
           Quickcheck.Generator.all
           @@ List.map keypairs ~f:(fun keypair ->
-                 let%bind balance = Currency.Balance.gen in
+                 let balance = Currency.Balance.of_int 1000 in
                  let nonce = Account_nonce.zero in
                  let (timing : Account_timing.t) =
                    Timed
@@ -8434,8 +8422,10 @@ let%test_module "account timing check" =
       Async.Quickcheck.test ~seed:(`Deterministic "user command, before cliff")
         ~sexp_of:[%sexp_of: Ledger.init_state * Transaction.t list] ~trials:2
         gen ~f:(fun (ledger_init_state, user_commands) ->
+          Format.eprintf "TRIAL!@." ;
           Ledger.with_ephemeral_ledger ~depth:constraint_constants.ledger_depth
             ~f:(fun ledger ->
+              Format.eprintf "INIT LEDGER@." ;
               Ledger.apply_initial_ledger_state ledger ledger_init_state ;
               apply_user_commands_at_slot ledger Mina_numbers.Global_slot.zero
                 user_commands))
