@@ -37,7 +37,7 @@ func (ctx *GoogleContext) GoogleStorageSave(objs ObjectsToSave) {
 		defer writer.Close()
 		_, err := io.Copy(writer, bytes.NewReader(bs))
 		if err != nil {
-			ctx.Log.Debugf("Error while saving metadata: %v", err)
+			ctx.Log.Warnf("Error while saving metadata: %v", err)
 			return
 		}
 	}
@@ -108,6 +108,7 @@ var nilPk Pk
 var nilTime time.Time
 
 func (h *SubmitH) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h.app.Log.Info("Received submission")
 	if r.ContentLength == -1 {
 		w.WriteHeader(411)
 		return

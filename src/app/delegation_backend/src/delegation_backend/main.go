@@ -4,6 +4,7 @@ import (
 	"context"
 	. "delegation_backend"
 	"net/http"
+	"strings"
 	"time"
 
 	"cloud.google.com/go/storage"
@@ -29,6 +30,7 @@ func main() {
 	app.Log = log
 	http.HandleFunc("/", func(rw http.ResponseWriter, r *http.Request) {
 		_, _ = rw.Write([]byte("delegation backend service"))
+		log.Infof("Healthcheck %s", r.URL.Path)
 	})
 	http.Handle("/v1/submit", app.NewSubmitH())
 	client, err1 := storage.NewClient(ctx)
@@ -38,6 +40,12 @@ func main() {
 	}
 	gctx := GoogleContext{Bucket: client.Bucket(CloudBucketName()), Context: ctx, Log: log}
 	app.Save = func(objs ObjectsToSave) {
+		keys := make([]string, 0, len(objs))
+		for k := range objs {
+			keys = append(keys, k)
+		}
+		keysStr := strings.Join(keys, ",")
+		log.Infof("Saving %d objects to Google Cloud Storage: %s", len(objs), keysStr)
 		gctx.GoogleStorageSave(objs)
 	}
 	app.Now = func() time.Time { return time.Now() }
