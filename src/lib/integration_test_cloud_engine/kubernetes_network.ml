@@ -40,17 +40,14 @@ module Node = struct
     Util.run_cmd_exn cwd "kubectl"
       (base_kube_args config @ [ "logs"; "-c"; container_id; pod_id ])
 
-  let run_in_container ?(env_vars = []) ?container_id ~cmd { pod_id; config; info; _ } =
+  let run_in_container ?(env_vars = []) ?container_id ~cmd
+      { pod_id; config; info; _ } =
     let container_id =
       Option.value container_id ~default:info.primary_container_id
     in
     let%bind cwd = Unix.getcwd () in
-    let env =
-      List.map ~f:(fun (k, v) -> sprintf "%s=%s" k v) env_vars
-    in
-    let cmd_with_env =
-      match env with [] -> cmd | _ -> "env" :: env @ cmd
-    in
+    let env = List.map ~f:(fun (k, v) -> sprintf "%s=%s" k v) env_vars in
+    let cmd_with_env = match env with [] -> cmd | _ -> ("env" :: env) @ cmd in
     Util.run_cmd_exn cwd "kubectl"
       ( base_kube_args config
       @ [ "exec"; "-c"; container_id; "-i"; pod_id; "--" ]
@@ -65,7 +62,7 @@ module Node = struct
       else Deferred.return ()
     in
     let%bind () =
-        Deferred.ignore_m (run_in_container ~env_vars node ~cmd:[ "/start.sh" ])
+      Deferred.ignore_m (run_in_container ~env_vars node ~cmd:[ "/start.sh" ])
     in
     Malleable_error.return ()
 
@@ -278,8 +275,7 @@ module Node = struct
 
   let get_metrics ~logger t =
     let open Deferred.Or_error.Let_syntax in
-    [%log info] "Getting node's metrics"
-      ~metadata:(logger_metadata t);
+    [%log info] "Getting node's metrics" ~metadata:(logger_metadata t) ;
     let query_obj = Graphql.Query_metrics.make () in
     let%bind query_result_obj =
       exec_graphql_request ~logger ~node:t ~query_name:"query_metrics" query_obj
